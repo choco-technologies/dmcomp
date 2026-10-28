@@ -402,8 +402,41 @@ static void test_invalid_streams( void )
     CHECK_EQ( dmcomp_inflate( "", 0, (uint8_t[1]){ 0 }, 1, &(size_t){ 0 } ), DMCOMP_ERR_TRUNCATED );
 }
 
+static void test_workspace_variant( void )
+{
+    // dmcomp_inflate_ws() with a workspace of exactly the right size on the heap: the same results, and the decoder
+    // does not touch a byte more of it (AddressSanitizer watches)
+    size_t v, size = dmcomp_inflate_workspace_size();
+    uint8_t out[sizeof(vec_text)];
+    size_t out_size = 0;
+    uint8_t* workspace = (uint8_t*)malloc( size );
+
+    CHECK( size > 1000 && size < 8192 );
+    for( v = 0; v < VECTOR_COUNT; v++ )
+    {
+        uint8_t* in = exact_copy( g_vectors[v].stream, g_vectors[v].stream_size );
+
+        CHECK_EQ( dmcomp_inflate_ws( in, g_vectors[v].stream_size, out, sizeof(out), &out_size, workspace ), DMCOMP_OK );
+        CHECK_EQ( out_size, g_vectors[v].expected_size );
+        CHECK( memcmp( out, g_vectors[v].expected, out_size ) == 0 );
+        free( in );
+    }
+
+    // The workspace is not carried between the calls: an error, then a good stream
+    CHECK_EQ( dmcomp_inflate_ws( "\x07", 1, out, sizeof(out), &out_size, workspace ), DMCOMP_ERR_DATA );
+    CHECK_EQ( dmcomp_inflate_ws( vec_dynamic, sizeof(vec_dynamic), out, sizeof(out), &out_size, workspace ), DMCOMP_OK );
+    CHECK_EQ( out_size, sizeof(vec_text) - 1 );
+
+    // The parameters: no workspace, or one that is not aligned
+    CHECK_EQ( dmcomp_inflate_ws( vec_fixed_a, sizeof(vec_fixed_a), out, sizeof(out), &out_size, NULL ), DMCOMP_ERR_PARAM );
+    CHECK_EQ( dmcomp_inflate_ws( vec_fixed_a, sizeof(vec_fixed_a), out, sizeof(out), &out_size, workspace + 1 ),
+              DMCOMP_ERR_PARAM );
+    free( workspace );
+}
+
 int main( void )
 {
+    RUN( test_workspace_variant );
     RUN( test_zlib_vectors );
     RUN( test_trailing_data_is_ignored );
     RUN( test_output_buffer_too_small );

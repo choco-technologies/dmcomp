@@ -41,7 +41,7 @@ typedef enum
 } dmcomp_result_t;
 
 /**
- * @brief Decompress a raw DEFLATE stream
+ * @brief Decompress a raw DEFLATE stream (the tables on the stack: ~3 kB, see dmcomp_inflate_ws() for the other way)
  *
  * Every block type is accepted (stored, fixed and dynamic Huffman codes). The data after the final block is ignored.
  * Corrupted data is never trusted: nothing is read beyond @p src + @p src_size and nothing is written beyond
@@ -56,6 +56,26 @@ typedef enum
  * @return DMCOMP_OK or an error (DMCOMP_ERR_DATA, DMCOMP_ERR_TRUNCATED, DMCOMP_ERR_OVERFLOW, DMCOMP_ERR_PARAM)
  */
 int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capacity, size_t* out_size );
+
+/**
+ * @brief Size of the work memory of dmcomp_inflate_ws()
+ *
+ * The tables of the Huffman codes: ~2.9 kB (see DMCOMP_LIT_FAST_BITS and DMCOMP_DIST_FAST_BITS in dmcomp_inflate.c).
+ */
+size_t dmcomp_inflate_workspace_size( void );
+
+/**
+ * @brief dmcomp_inflate() with the work memory given by the caller
+ *
+ * The same decoder, but its tables are not on the stack: for a thread with a small one (the decoding may be called from
+ * anywhere a module is loaded), give it memory from the heap, or a buffer of your own that is not used at the time.
+ *
+ * @param workspace     dmcomp_inflate_workspace_size() bytes, aligned to 2 bytes (what malloc returns is); not used after the call
+ *
+ * Other parameters and results: see dmcomp_inflate(). DMCOMP_ERR_PARAM also for a NULL or odd workspace.
+ */
+int dmcomp_inflate_ws( const void* src, size_t src_size, void* dst, size_t dst_capacity, size_t* out_size,
+                       void* workspace );
 
 /** Name of a result, for logs. Never NULL. */
 const char* dmcomp_strerror( int result );

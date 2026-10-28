@@ -91,7 +91,14 @@ typedef struct
     uint16_t    dist_fast[1u << DMCOMP_DIST_FAST_BITS];
     uint16_t    dist_count[DMCOMP_MAX_BITS + 1];
     uint16_t    dist_sym[DIST_TABLE_SIZE];
-} tables_t;
+
+    // The header of a dynamic block (the lengths of the codes, and the code of the lengths)
+    uint8_t     lengths[LITLEN_TABLE_SIZE + DIST_TABLE_SIZE];
+    uint8_t     clen[DMCOMP_CLEN_SYMBOLS];
+    uint16_t    cfast[1u << CLEN_FAST_BITS];
+    uint16_t    ccount[DMCOMP_MAX_BITS + 1];
+    uint16_t    csym[DMCOMP_CLEN_SYMBOLS];
+} workspace_t;
 
 static unsigned reverse_bits( unsigned code, unsigned length )
 {
@@ -222,9 +229,9 @@ static int huff_decode( bitreader_t* b, const uint16_t* fast, unsigned fast_bits
 //      Blocks
 // =====================================================================================================================
 
-static int build_fixed( tables_t* t )
+static int build_fixed( workspace_t* t )
 {
-    uint8_t lengths[LITLEN_TABLE_SIZE];
+    uint8_t* lengths = t->lengths;
     unsigned i;
     for( i = 0; i < 144; i++ ) lengths[i] = 8;
     for( ; i < 256; i++ )      lengths[i] = 9;
@@ -240,15 +247,20 @@ static int build_fixed( tables_t* t )
 }
 
 /** Reads the header of a dynamic block (RFC 1951, 3.2.7) and builds its tables */
-static int build_dynamic( bitreader_t* b, tables_t* t )
+static int build_dynamic( bitreader_t* b, workspace_t* t )
 {
-    uint8_t     lengths[LITLEN_TABLE_SIZE + DIST_TABLE_SIZE];
-    uint8_t     clen[DMCOMP_CLEN_SYMBOLS] = { 0 };
-    uint16_t    cfast[1u << CLEN_FAST_BITS];
-    uint16_t    ccount[DMCOMP_MAX_BITS + 1];
-    uint16_t    csym[DMCOMP_CLEN_SYMBOLS];
+    uint8_t*    lengths = t->lengths;
+    uint8_t*    clen = t->clen;
+    uint16_t*   cfast = t->cfast;
+    uint16_t*   ccount = t->ccount;
+    uint16_t*   csym = t->csym;
     unsigned    hlit, hdist, hclen, i, total;
     int         r;
+
+    for( i = 0; i < DMCOMP_CLEN_SYMBOLS; i++ )
+    {
+        clen[i] = 0;
+    }
 
     refill( b );
     hlit  = take( b, 5 ) + 257;
@@ -343,7 +355,7 @@ static int build_dynamic( bitreader_t* b, tables_t* t )
 }
 
 /** Decodes the symbols of a Huffman coded block up to its end of block code */
-static int inflate_codes( bitreader_t* b, const tables_t* t, uint8_t* dst, uint8_t** pout, uint8_t* end )
+static int inflate_codes( bitreader_t* b, const workspace_t* t, uint8_t* dst, uint8_t** pout, uint8_t* end )
 {
     uint8_t* out = *pout;
 
@@ -471,15 +483,23 @@ static int inflate_stored( bitreader_t* b, uint8_t** pout, uint8_t* end )
 //      Public API
 // =====================================================================================================================
 
-int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capacity, size_t* out_size )
+size_t dmcomp_inflate_workspace_size( void )
+{
+    return sizeof(workspace_t);
+}
+
+int dmcomp_inflate_ws( const void* src, size_t src_size, void* dst, size_t dst_capacity, size_t* out_size,
+                       void* workspace )
 {
     bitreader_t b;
     uint8_t*    out = (uint8_t*)dst;
     uint8_t*    end;
     int         last;
+    workspace_t* tables = (workspace_t*)workspace;
 
     // Checked before any pointer is moved: a NULL pointer is only valid for an empty buffer, and is not added to
-    if( out_size == NULL || (src == NULL && src_size != 0) || (dst == NULL && dst_capacity != 0) )
+    if( out_size == NULL || (src == NULL && src_size != 0) || (dst == NULL && dst_capacity != 0) ||
+        workspace == NULL || ((uintptr_t)workspace & (sizeof(uint16_t) - 1u)) != 0 )
     {
         return DMCOMP_ERR_PARAM;
     }
@@ -494,7 +514,6 @@ int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capa
 
     do
     {
-        tables_t    tables;
         unsigned    type;
         int         r;
 
@@ -514,11 +533,11 @@ int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capa
         {
             if( type == 1 )
             {
-                r = build_fixed( &tables );
+                r = build_fixed( tables );
             }
             else if( type == 2 )
             {
-                r = build_dynamic( &b, &tables );
+                r = build_dynamic( &b, tables );
             }
             else
             {
@@ -526,7 +545,7 @@ int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capa
             }
             if( r == DMCOMP_OK )
             {
-                r = inflate_codes( &b, &tables, (uint8_t*)dst, &out, end );
+                r = inflate_codes( &b, tables, (uint8_t*)dst, &out, end );
             }
         }
         if( r != DMCOMP_OK )
@@ -542,4 +561,11 @@ int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capa
     }
     *out_size = (size_t)(out - (uint8_t*)dst);
     return DMCOMP_OK;
+}
+
+int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capacity, size_t* out_size )
+{
+    workspace_t workspace;      // A few kB of the stack: dmcomp_inflate_ws() puts it where the caller wants
+
+    return dmcomp_inflate_ws( src, src_size, dst, dst_capacity, out_size, &workspace );
 }

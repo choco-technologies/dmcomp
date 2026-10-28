@@ -3,8 +3,10 @@
 DMOD compression: a **DEFLATE** ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) coder and decoder in one small C library,
 so that the host tools and the target run the very same implementation.
 
-* **Decoder** (`dmcomp_inflate`) – for the target. 1.6 kB of code on Cortex-M, no heap, no static data (reentrant),
-  ~2.8 kB of stack, nothing but `<stddef.h>`, `<stdint.h>` and `memcpy`. The output buffer is the window.
+* **Decoder** (`dmcomp_inflate`) – for the target. 1.7 kB of code on Cortex-M, no heap, no static data (reentrant),
+  nothing but `<stddef.h>`, `<stdint.h>` and `memcpy`. The output buffer is the window. The tables of the Huffman codes
+  (~2.9 kB) are on the stack in `dmcomp_inflate`, or in memory of the caller's choice in `dmcomp_inflate_ws` (then the
+  stack of the decoder is 192 B) – use that one in a thread with a small stack.
 * **Encoder** (`dmcomp_deflate`) – for the host (`todmfc`, the build). Hash chains, lazy matching, nine levels, length
   limited Huffman codes; every block is written as the smallest of stored / fixed / dynamic. ~330 kB of work memory.
   `-DDMCOMP_BUILD_ENCODER=OFF` leaves it out.
@@ -24,7 +26,7 @@ The 35 modules of the internal flash of the `stm32f746g-disco` firmware of
 | zlib -9 (reference) | 172 337 B | 54.4 % |
 
 Decoding on a PC (all 35 modules): FastLZ 643 MB/s, dmcomp 197 MB/s, zlib 318 MB/s. On Cortex-M7 the decoder is
-`text` 1620 B (M0+: 1738 B), stack 2824 B – `scripts/check_size.sh` checks it in the CI.
+`text` 1700 B (M0+: 1806 B), stack 2760 B (192 B with `dmcomp_inflate_ws`) – `scripts/check_size.sh` checks it in the CI.
 
 ## API
 
@@ -39,6 +41,10 @@ int result = dmcomp_deflate( data, size, packed, bound, &packed_size, 9 /* level
 
 // Target: the size of the result is known (e.g. the OriginalSize of the DMFC header)
 result = dmcomp_inflate( packed, packed_size, out, size, &out_size );
+
+// ...or with the tables not on the stack (a thread with a small one)
+void* workspace = malloc( dmcomp_inflate_workspace_size() );
+result = dmcomp_inflate_ws( packed, packed_size, out, size, &out_size, workspace );
 if( result != DMCOMP_OK ) log( "%s", dmcomp_strerror( result ) );
 ```
 
