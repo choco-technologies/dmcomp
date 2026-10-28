@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "gcc, Release",                cc: gcc,   build_type: Release, sanitize: "OFF" }
+          - { name: "gcc, Debug, ASan + UBSan",    cc: gcc,   build_type: Debug,   sanitize: "ON" }
+          - { name: "clang, Release",              cc: clang, build_type: Release, sanitize: "OFF" }
+          - { name: "clang, Debug, ASan + UBSan",  cc: clang, build_type: Debug,   sanitize: "ON" }
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake zlib1g-dev clang
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DDMCOMP_SANITIZE=${{ matrix.sanitize }} \
+            -DDMCOMP_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+  test-32bit:
+    name: gcc, 32 bit (size_t is 32 bits like on the target)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake gcc-multilib
+
+      - name: Configure
+        # The 32 bit zlib is not installed: the test against zlib is covered by the 64 bit jobs
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DDMCOMP_WITH_ZLIB=OFF \
+            -DDMCOMP_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+  decoder-for-the-target:
+    name: Decoder for Cortex-M (code and stack)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi
+
+      - name: Size of the decoder
+        run: scripts/check_size.sh build-size
+
+      - name: The library without the encoder builds
+        run: |
+          sudo apt-get install -y --no-install-recommends cmake
+          cmake -S . -B build-decoder -DDMCOMP_BUILD_ENCODER=OFF -DDMCOMP_WERROR=ON
+          cmake --build build-decoder --parallel
