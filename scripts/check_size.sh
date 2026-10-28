@@ -1,14 +1,16 @@
 #!/bin/sh
 # Compiles the decoder for Cortex-M and checks what it costs a firmware: the code and the stack.
 # Usage: scripts/check_size.sh [output directory]
-#   DMCOMP_MAX_TEXT   limit of the code in bytes (default 2048)
-#   DMCOMP_MAX_STACK  limit of the stack of dmcomp_inflate in bytes (default 3072)
+#   DMCOMP_MAX_TEXT      limit of the code in bytes (default 2048)
+#   DMCOMP_MAX_STACK     limit of the stack of dmcomp_inflate in bytes (default 3072: its tables are on the stack)
+#   DMCOMP_MAX_STACK_WS  limit of the stack of dmcomp_inflate_ws in bytes (default 256: the tables are the caller's)
 set -e
 
 CC=${CC:-arm-none-eabi-gcc}
 SIZE=${SIZE:-arm-none-eabi-size}
 MAX_TEXT=${DMCOMP_MAX_TEXT:-2048}
 MAX_STACK=${DMCOMP_MAX_STACK:-3072}
+MAX_STACK_WS=${DMCOMP_MAX_STACK_WS:-256}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=${1:-$(mktemp -d)}
 mkdir -p "$OUT"
@@ -22,14 +24,17 @@ for cpu in cortex-m0plus cortex-m4 cortex-m7; do
 
     text=$("$SIZE" "$obj" | awk 'NR==2 { print $1 }')
     data=$("$SIZE" "$obj" | awk 'NR==2 { print $2 + $3 }')
-    stack=$(awk -F'\t' '$1 ~ /dmcomp_inflate$/ { print $2 }' "$OUT/dmcomp_inflate-$cpu.su")
     huff=$(awk -F'\t' '$1 ~ /huff_build$/ { print $2 }' "$OUT/dmcomp_inflate-$cpu.su")
-    stack=$((stack + huff))      # huff_build is called from dmcomp_inflate: the worst case is both
+    stack=$(awk -F'\t' '$1 ~ /dmcomp_inflate$/ { print $2 }' "$OUT/dmcomp_inflate-$cpu.su")
+    stack_ws=$(awk -F'\t' '$1 ~ /dmcomp_inflate_ws$/ { print $2 }' "$OUT/dmcomp_inflate-$cpu.su")
+    stack=$((stack + huff))      # huff_build is called from the decoder: the worst case is both
+    stack_ws=$((stack_ws + huff))
 
-    echo "$cpu: code $text B (limit $MAX_TEXT), static data $data B, stack $stack B (limit $MAX_STACK)"
+    echo "$cpu: code $text B (limit $MAX_TEXT), static data $data B, stack $stack B (limit $MAX_STACK), with a workspace $stack_ws B (limit $MAX_STACK_WS)"
     [ "$data" -eq 0 ] || { echo "  FAIL: the decoder has static data (it has to be reentrant)"; failed=1; }
     [ "$text" -le "$MAX_TEXT" ] || { echo "  FAIL: the code is too big"; failed=1; }
     [ "$stack" -le "$MAX_STACK" ] || { echo "  FAIL: the stack is too big"; failed=1; }
+    [ "$stack_ws" -le "$MAX_STACK_WS" ] || { echo "  FAIL: the stack with a workspace is too big"; failed=1; }
 done
 
 exit $failed

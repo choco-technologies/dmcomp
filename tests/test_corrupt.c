@@ -10,15 +10,20 @@
 /** Decodes damaged data in buffers of exactly the given sizes */
 static int decode_damaged( const uint8_t* stream, size_t size, size_t capacity )
 {
+    static unsigned calls;
     uint8_t* in = exact_copy( stream, size );
     uint8_t* out = (uint8_t*)malloc( capacity ? capacity : 1 );
+    uint8_t* workspace = (uint8_t*)malloc( dmcomp_inflate_workspace_size() );
     size_t   out_size = 0;
-    int      result = dmcomp_inflate( in, size, out, capacity, &out_size );
+    // Both ways to call the decoder (the stack and the workspace of the caller), alternately
+    int      result = (calls++ & 1u) ? dmcomp_inflate( in, size, out, capacity, &out_size )
+                                     : dmcomp_inflate_ws( in, size, out, capacity, &out_size, workspace );
 
     CHECK( out_size <= capacity );
     CHECK( result == DMCOMP_OK || result < 0 );
     free( in );
     free( out );
+    free( workspace );
     return result;
 }
 
