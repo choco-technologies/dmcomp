@@ -107,7 +107,10 @@ static void put_stored( bitwriter_t* w, const uint8_t* data, size_t length, int 
         {
             w->overflow = 1;
         }
-        data += chunk;
+        if( chunk > 0 )
+        {
+            data += chunk;
+        }
     }
     while( length > 0 );
 }
@@ -752,7 +755,7 @@ int dmcomp_deflate( const void* src, size_t src_size, void* dst, size_t dst_capa
     e->cfg     = &g_levels[level];
     e->w.start = (uint8_t*)dst;
     e->w.p     = (uint8_t*)dst;
-    e->w.end   = (uint8_t*)dst + dst_capacity;
+    e->w.end   = dst_capacity != 0 ? (uint8_t*)dst + dst_capacity : (uint8_t*)dst;     // NULL is not moved
     init_code_tables( e );
 
     if( level == 0 )

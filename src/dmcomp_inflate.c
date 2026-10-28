@@ -475,17 +475,19 @@ int dmcomp_inflate( const void* src, size_t src_size, void* dst, size_t dst_capa
 {
     bitreader_t b;
     uint8_t*    out = (uint8_t*)dst;
-    uint8_t*    end = out + dst_capacity;
+    uint8_t*    end;
     int         last;
 
+    // Checked before any pointer is moved: a NULL pointer is only valid for an empty buffer, and is not added to
     if( out_size == NULL || (src == NULL && src_size != 0) || (dst == NULL && dst_capacity != 0) )
     {
         return DMCOMP_ERR_PARAM;
     }
     *out_size = 0;
 
+    end    = dst_capacity != 0 ? out + dst_capacity : out;
     b.p    = (const uint8_t*)src;
-    b.end  = b.p + src_size;
+    b.end  = src_size != 0 ? b.p + src_size : b.p;
     b.bits = 0;
     b.n    = 0;
     b.virt = 0;

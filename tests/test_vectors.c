@@ -219,6 +219,11 @@ static void test_empty_output( void )
     CHECK_EQ( decode( stored_empty, sizeof(stored_empty), 0, &out, &out_size ), DMCOMP_OK );
     CHECK_EQ( out_size, 0 );
     free( out );
+
+    // NULL is a valid buffer when it is empty (and no pointer is moved from it)
+    out_size = 99;
+    CHECK_EQ( dmcomp_inflate( fixed_empty, sizeof(fixed_empty), NULL, 0, &out_size ), DMCOMP_OK );
+    CHECK_EQ( out_size, 0 );
 }
 
 static void test_blocks_one_after_another( void )
